@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Face Mask Monitoring</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --text:#e2e8f0; --ok:#22c55e; --bad:#ef4444; --muted:#94a3b8; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, Arial, sans-serif; background:var(--bg); color:var(--text); }
+  header { padding:16px 24px; font-size:1.3rem; font-weight:600; border-bottom:1px solid #334155; }
+  main { display:flex; flex-wrap:wrap; gap:20px; padding:20px; }
+  .card { background:var(--card); border-radius:12px; padding:16px; }
+
+  #videoWrap { position:relative; width:640px; max-width:100%; }
+  #video { width:100%; display:block; border-radius:8px; background:#000; }
+  /* overlay canvas must be fully transparent so the video shows through */
+  #overlay { position:absolute; left:0; top:0; width:100%; height:100%; background:transparent !important; pointer-events:none; }
+
+  .side { flex:1; min-width:260px; }
+  .stats { display:flex; gap:12px; margin-bottom:12px; }
+  .stat { flex:1; text-align:center; padding:12px; border-radius:8px; background:#0f172a; }
+  .stat b { display:block; font-size:2rem; }
+  .ok b { color:var(--ok); } .bad b { color:var(--bad); }
+  button { padding:10px 18px; border:0; border-radius:8px; font-size:1rem; cursor:pointer; background:#3b82f6; color:#fff; margin-right:8px; }
+  button.stop { background:#64748b; }
+  #status { margin-top:10px; color:var(--muted); font-size:.9rem; }
+  #log { max-height:240px; overflow:auto; font-size:.9rem; margin-top:8px; }
+  #log div { padding:4px 0; border-bottom:1px solid #334155; }
+  #alert { display:none; margin-bottom:12px; padding:10px; background:var(--bad); border-radius:8px; font-weight:600; text-align:center; }
+</style>
+</head>
+<body>
+<header>😷 Face Mask Monitoring System</header>
+<main>
+  <div class="card">
+    <div id="videoWrap">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="overlay"></canvas>
+    </div>
+    <div style="margin-top:12px">
+      <button id="startBtn">Start camera</button>
+      <button id="stopBtn" class="stop">Stop</button>
+    </div>
+    <div id="status">Camera is off.</div>
+  </div>
+
+  <div class="card side">
+    <div id="alert">⚠ Person without mask detected!</div>
+    <div class="stats">
+      <div class="stat ok"><b id="maskCount">0</b>With mask</div>
+      <div class="stat bad"><b id="noMaskCount">0</b>No mask</div>
+    </div>
+    <strong>Violation log</strong>
+    <div id="log"></div>
+  </div>
+</main>
+
+<canvas id="capture" style="display:none"></canvas>
+
+<script>
+const video = document.getElementById("video");
+const overlay = document.getElementById("overlay");
+const capture = document.getElementById("capture");
+const statusEl = document.getElementById("status");
+const alertEl = document.getElementById("alert");
+const logEl = document.getElementById("log");
+
+const SEND_WIDTH = 480;       // frames are downscaled before upload (faster)
+const INTERVAL_MS = 300;      // pause between requests
+let stream = null, running = false, lastLogTime = 0;
+
+document.getElementById("startBtn").onclick = startCamera;
+document.getElementById("stopBtn").onclick = stopCamera;
+
+async function startCamera() {
+  if (running) return;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 }, audio: false });
+  } catch (e) {
+    statusEl.textContent = "Cannot access camera: " + e.message + " (open http://localhost:5000, HTTPS is required on other addresses)";
+    return;
+  }
+  video.srcObject = stream;
+  await video.play();
+  running = true;
+  statusEl.textContent = "Monitoring...";
+  loop();
+}
+
+function stopCamera() {
+  running = false;
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  video.srcObject = null;
+  overlay.getContext("2d").clearRect(0, 0, overlay.width, overlay.height);
+  alertEl.style.display = "none";
+  document.getElementById("maskCount").textContent = 0;
+  document.getElementById("noMaskCount").textContent = 0;
+  statusEl.textContent = "Camera is off.";
+}
+
+async function loop() {
+  while (running) {
+    try { await analyzeFrame(); }
+    catch (e) { statusEl.textContent = "Server error: " + e.message; }
+    await new Promise(r => setTimeout(r, INTERVAL_MS));
+  }
+}
+
+async function analyzeFrame() {
+  if (!video.videoWidth) return;
+  const scale = SEND_WIDTH / video.videoWidth;
+  capture.width = SEND_WIDTH;
+  capture.height = Math.round(video.videoHeight * scale);
+  capture.getContext("2d").drawImage(video, 0, 0, capture.width, capture.height);
+
+  const blob = await new Promise(res => capture.toBlob(res, "image/jpeg", 0.8));
+  const form = new FormData();
+  form.append("image", blob, "frame.jpg");
+
+  const resp = await fetch("/predict", { method: "POST", body: form });
+  if (!resp.ok) throw new Error("HTTP " + resp.status);
+  const data = await resp.json();
+  if (!running) return;               // user pressed Stop while request was in flight
+  draw(data);
+  statusEl.textContent = "Monitoring... faces in frame: " + data.faces_detected;
+}
+
+function draw(data) {
+  // match overlay resolution to the sent frame; CSS scales it to the video size
+  overlay.width = data.image_width;
+  overlay.height = data.image_height;
+  const ctx = overlay.getContext("2d");
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+  ctx.lineWidth = 3;
+  ctx.font = "bold 18px Arial";
+
+  data.faces.forEach(f => {
+    const b = f.box, color = f.with_mask ? "#22c55e" : "#ef4444";
+    ctx.strokeStyle = color;
+    ctx.strokeRect(b.x, b.y, b.w, b.h);
+    const text = f.label + " " + Math.round(f.confidence * 100) + "%";
+    const tw = ctx.measureText(text).width + 8;
+    ctx.fillStyle = color;
+    ctx.fillRect(b.x, Math.max(0, b.y - 24), tw, 24);
+    ctx.fillStyle = "#fff";
+    ctx.fillText(text, b.x + 4, Math.max(18, b.y - 6));
+  });
+
+  document.getElementById("maskCount").textContent = data.with_mask;
+  document.getElementById("noMaskCount").textContent = data.without_mask;
+  alertEl.style.display = data.without_mask > 0 ? "block" : "none";
+
+  // log a violation at most once every 5 seconds
+  if (data.without_mask > 0 && Date.now() - lastLogTime > 5000) {
+    lastLogTime = Date.now();
+    const div = document.createElement("div");
+    div.textContent = new Date().toLocaleTimeString() + " – " + data.without_mask + " person(s) without mask";
+    logEl.prepend(div);
+  }
+}
+</script>
+</body>
+</html>

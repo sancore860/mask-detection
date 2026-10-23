@@ -1,0 +1,5 @@
+flask>=3.0
+waitress
+numpy
+opencv-python-headless<5
+tensorflow>=2.20
