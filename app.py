@@ -17,7 +17,7 @@ from tensorflow.keras.models import load_model
 
 # ---------------- Config (must match your training notebook) ----------------
 IMG_SIZE = 128                                   # same as IMG_SIZE in notebook
-MODEL_PATH = os.environ.get("MODEL_PATH", "best_simple_cnn_mask.h5")
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "best_simple_cnn_mask.h5")
 # train_gen.class_indices = {'with_mask': 0, 'without_mask': 1}
 # sigmoid output  > 0.5  ->  without_mask,  <= 0.5 -> with_mask
 THRESHOLD = 0.5
