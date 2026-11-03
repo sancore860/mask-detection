@@ -1,6 +1,8 @@
 opencv-python-headless
 flask>=3.0
+gunicorn>=22.0
 waitress
-numpy
 opencv-python-headless<5
-tensorflow>=2.20
+tensorflow-cpu>=2.17
+pillow>=10.4
+numpy>=1.26
