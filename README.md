@@ -2,7 +2,7 @@
 
 A deep learning web app that detects whether a person in an uploaded photo is **wearing a face mask or not**. A custom CNN built with TensorFlow/Keras does the classification, and a Flask backend with an HTML/CSS front end serves it.
 
-**🔗 Live demo:** [https://YOUR-SERVICE-NAME.onrender.com](https://mask-detection-79q2.onrender.com/)
+**🔗 Live demo:** (https://mask-detection-79q2.onrender.com/)
 
 > The app is hosted on Render's free plan, so it sleeps after 15 minutes without visitors. The first load after a quiet period can take about a minute.
 
