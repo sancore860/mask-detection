@@ -1,3 +1,4 @@
+opencv-python-headless
 flask>=3.0
 waitress
 numpy
